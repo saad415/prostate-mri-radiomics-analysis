@@ -209,10 +209,10 @@ def evaluate(name: str, model, X: np.ndarray, y: np.ndarray,
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--features", default="results/t2_radiomics_features.csv",
-                        help="Extracted radiomics CSV (T2 or ADC).")
+    parser.add_argument("--features", default="results/adc_radiomics_features.csv",
+                        help="Extracted ADC radiomics CSV.")
     parser.add_argument("--variability", default="results/adc_inter_reader_variability.csv")
-    parser.add_argument("--dice-threshold", type=float, default=0.5,
+    parser.add_argument("--dice-threshold", type=float, default=0.608,
                         help="Dice < threshold -> ambiguous (label=1).")
     parser.add_argument("--figures-dir", default="results/figures")
     parser.add_argument("--output", default="results/ambiguity_classification_report.csv")
@@ -246,8 +246,9 @@ def main() -> None:
     # LASSO feature selection
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    lasso = LogisticRegressionCV(Cs=20, cv=n_folds, penalty="l1",
-                                  solver="liblinear", max_iter=2000,
+    strict_Cs = np.logspace(-3, -0.5, 20)   # [0.001 … 0.316] — forces sparsity
+    lasso = LogisticRegressionCV(Cs=strict_Cs, cv=n_folds, penalty="l1",
+                                  solver="liblinear", max_iter=5000,
                                   random_state=42, scoring="roc_auc")
     lasso.fit(X_scaled, y)
     plot_lasso_features(feature_names, lasso.coef_.ravel(), figures_dir)

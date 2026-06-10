@@ -1,0 +1,41 @@
+{
+  "case_id": "039",
+  "predicted_label": "Ambiguous",
+  "ambiguity_score": 1.0,
+  "label_groundtruth": "Clearly Ambiguous",
+  "dice_reader1_reader2": 0.515,
+  "dice_threshold": 0.608,
+  "top_features": [
+    {
+      "name": "glcm_d01_correlation",
+      "raw_value": 0.9286,
+      "contribution": 0.1336
+    },
+    {
+      "name": "fo_percentile_20",
+      "raw_value": 851.3675,
+      "contribution": 0.1011
+    },
+    {
+      "name": "glcm_d03_correlation",
+      "raw_value": 0.8882,
+      "contribution": 0.035
+    },
+    {
+      "name": "fo_histogram_bin_26",
+      "raw_value": 0.0084,
+      "contribution": 0.0347
+    },
+    {
+      "name": "glcm_d10_homogeneity",
+      "raw_value": 0.2641,
+      "contribution": 0.0159
+    }
+  ],
+  "reader1_volume_voxels": 1195,
+  "reader2_volume_voxels": 564,
+  "hausdorff_distance_voxels": 13.04,
+  "modality": "ADC",
+  "features_from": "ADC",
+  "dataset": "Prostate158"
+}

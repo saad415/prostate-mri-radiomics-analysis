@@ -2,10 +2,11 @@
 Radiomic feature selection via LASSO (L1 logistic regression) and mutual
 information ranking.
 
-Reads the extracted feature CSV, derives the same binary risk label used in
-train_classifier.py, then:
+Reads ADC radiomic features + ADC inter-reader variability CSV, labels cases
+by Dice inter-reader agreement (Dice < 0.608 → ambiguous), then:
 
-  1. Runs LASSO with cross-validated alpha selection (LogisticRegressionCV).
+  1. Runs LASSO with strict C values (logspace -3 to -0.5) so it genuinely
+     zeros out uninformative features on this 67-case dataset.
   2. Reports the top surviving features (non-zero coefficients).
   3. Ranks ALL features by mutual information with the label.
   4. Saves two figures:
@@ -33,20 +34,21 @@ warnings.filterwarnings("ignore")
 
 
 # ---------------------------------------------------------------------------
-# Helpers (same label / matrix logic as train_classifier.py)
+# Helpers
 # ---------------------------------------------------------------------------
 
-def derive_labels(df: pd.DataFrame) -> pd.Series:
-    vol_col = next((c for c in df.columns if "volume_mm3" in c or "volume_voxels" in c), None)
-    ent_col = next((c for c in df.columns if "entropy" in c and "glcm" not in c), None)
-    if vol_col and ent_col:
-        labels = ((df[vol_col] >= df[vol_col].median()) & (df[ent_col] >= df[ent_col].median())).astype(int)
-    elif vol_col:
-        labels = (df[vol_col] >= df[vol_col].median()).astype(int)
-    else:
-        numeric = df.select_dtypes(include="number").columns
-        labels = (df[numeric[0]] >= df[numeric[0]].median()).astype(int)
-    return labels
+DICE_THRESHOLD = 0.608
+
+def load_merged(features_path: Path, variability_path: Path) -> tuple[pd.DataFrame, np.ndarray]:
+    """Merge ADC features with ADC inter-reader Dice label."""
+    feats = pd.read_csv(features_path)
+    feats["case_id"] = feats["case_id"].astype(str).str.zfill(3)
+    var = pd.read_csv(variability_path)
+    var["case_id"] = var["case_id"].astype(str).str.zfill(3)
+    merged = feats.merge(var[["case_id", "dice"]], on="case_id", how="inner")
+    y = (merged["dice"] < DICE_THRESHOLD).astype(int).values
+    logging.info("Merged: %d cases  ambiguous=%d  clear=%d", len(merged), y.sum(), (y == 0).sum())
+    return merged, y
 
 
 def build_feature_matrix(df: pd.DataFrame) -> pd.DataFrame:
@@ -86,12 +88,15 @@ def run_lasso(X: np.ndarray, y: np.ndarray, feature_names: list[str]) -> pd.Data
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
+    # Force strict regularization: C in [0.001, 0.316] — much smaller than
+    # sklearn's default range. With n=67 and p=168, weak C selects everything.
+    strict_Cs = np.logspace(-3, -0.5, 20)
     lasso = LogisticRegressionCV(
-        Cs=20,
+        Cs=strict_Cs,
         cv=5,
         penalty="l1",
         solver="liblinear",
-        max_iter=2000,
+        max_iter=5000,
         random_state=42,
         scoring="roc_auc",
     )
@@ -126,8 +131,8 @@ def plot_lasso(df_lasso: pd.DataFrame, figures_dir: Path, top_n: int = 20) -> No
     ax.title.set_color("white")
     # Colour legend
     from matplotlib.patches import Patch
-    ax.legend(handles=[Patch(color="#2dd4bf", label="High-risk ↑"),
-                        Patch(color="#f472b6", label="Low-risk ↑")],
+    ax.legend(handles=[Patch(color="#2dd4bf", label="Ambiguous ↑"),
+                        Patch(color="#f472b6", label="Clear ↑")],
               facecolor="#1a2530", labelcolor="white", fontsize=9)
     fig.tight_layout()
     out = figures_dir / "lasso_feature_importance.png"
@@ -153,7 +158,7 @@ def plot_mutual_info(df_mi: pd.DataFrame, figures_dir: Path, top_n: int = 20) ->
 
     fig, ax = plt.subplots(figsize=(8, max(4, top_n * 0.35)))
     ax.barh(top["short"][::-1], top["mutual_info"][::-1], color="#a78bfa", height=0.65)
-    ax.set_xlabel("Mutual information with risk label", fontsize=11)
+    ax.set_xlabel("Mutual information with inter-reader ambiguity label", fontsize=11)
     ax.set_title(f"Top {top_n} features by mutual information", fontsize=12)
     ax.set_facecolor("#0b1014")
     fig.patch.set_facecolor("#0b1014")
@@ -175,7 +180,8 @@ def plot_mutual_info(df_mi: pd.DataFrame, figures_dir: Path, top_n: int = 20) ->
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LASSO + mutual information feature selection for radiomic signatures.")
-    parser.add_argument("--features", default="results/t2_radiomics_features.csv")
+    parser.add_argument("--features", default="results/adc_radiomics_features.csv")
+    parser.add_argument("--variability", default="results/adc_inter_reader_variability.csv")
     parser.add_argument("--figures-dir", default="results/figures")
     parser.add_argument("--output", default="results/selected_features.csv")
     parser.add_argument("--top-n", type=int, default=20)
@@ -184,18 +190,22 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     features_path = Path(args.features)
+    variability_path = Path(args.variability)
     if not features_path.exists():
-        logging.error("Feature CSV not found: %s\nRun extract_t2_radiomics.py first.", features_path)
+        logging.error("Feature CSV not found: %s\nRun adc_pipeline.py first.", features_path)
+        raise SystemExit(1)
+    if not variability_path.exists():
+        logging.error("Variability CSV not found: %s", variability_path)
         raise SystemExit(1)
 
     figures_dir = Path(args.figures_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(features_path)
-    logging.info("Loaded %d cases", len(df))
+    df, y = load_merged(features_path, variability_path)
 
     X_df = build_feature_matrix(df)
-    y = derive_labels(X_df).values
+    # align y to X_df index (merge may have reordered rows)
+    y = y[X_df.index] if len(y) == len(df) else y
     X = X_df.values
     feature_names = list(X_df.columns)
 
