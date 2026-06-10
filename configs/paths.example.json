@@ -1,0 +1,6 @@
+{
+  "dataset_root": "E:/prostate158_train/prostate158_train",
+  "split": "train",
+  "results_dir": "results",
+  "figures_dir": "results/figures"
+}
