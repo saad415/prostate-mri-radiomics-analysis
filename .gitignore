@@ -27,6 +27,7 @@ results/*.xlsx
 results/figures/*.png
 results/figures/*.jpg
 results/figures/*.svg
+results/sample_cases/*.png
 
 # OS/editor
 .DS_Store
